@@ -1,28 +1,26 @@
 version: "3.8"
 
 services:
-  mysql:
-    image: mysql:8.0.39
+  mongodb:
+    image: mongo:latest
     environment:
-      MYSQL_ROOT_PASSWORD: group20
-      MYSQL_DATABASE: geolife
+      - MONGO_INITDB_DATABASE=geolife
     volumes:
-      - mysql_data:/var/lib/mysql
+      - mongodb_data:/data/db
     ports:
-      - "3306:3306"
+      - "27017:27017"
 
   app:
     build: .
-    container_name: exercise2
+    container_name: exercise3
     depends_on:
-      - mysql
+      - mongodb
     volumes:
       - .:/app
     environment:
-      - MYSQL_HOST=mysql
-      - MYSQL_DATABASE=geolife
-      - MYSQL_USER=root
-      - MYSQL_PASSWORD=group20
+      - MONGODB_URI=mongodb://mongodb:27017/
+      - MONGODB_DATABASE=geolife
     command: tail -f /dev/null
+
 volumes:
-  mysql_data:
+  mongodb_data:
