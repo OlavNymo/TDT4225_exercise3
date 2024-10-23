@@ -11,7 +11,23 @@ class ActivityTrackerProgram:
     def print_query_results(self, results, headers):
         print(tabulate(results, headers=headers, tablefmt='psql'))
         print()  # Add a blank line for readability
-
+        
+    # Print some activities in a nice format for users 141 and 144
+    def print_activities(self, activities):
+        print("Sample activities for users 141 and 144:")
+        for activity in activities:
+            user_id = activity['user_id']
+            if user_id in ['135','141', '144']:
+                activity_id = activity['_id']
+                start_time = activity['start_date_time']
+                end_time = activity['end_date_time']
+                transportation_mode = activity['transportation_mode']
+                trackpoint_count = len(activity['trackpoints'])
+                print(f"User ID: {user_id}, Activity ID: {activity_id}")
+                print(f"Start Time: {start_time}, End Time: {end_time}")
+                print(f"Transportation Mode: {transportation_mode}")
+                print(f"Trackpoint Count: {trackpoint_count}")
+                print()
     # 1. Dataset counts
     def count_dataset_elements(self):
         user_count = self.db.users.count_documents({})
@@ -154,51 +170,78 @@ class ActivityTrackerProgram:
         print("\n7. Total distance walked in 2008 by user with id=112:")
         print(f"   {total_distance:.2f} km")
 
-    # 8. Top 20 users by altitude gain
     def top_20_users_by_altitude_gain(self):
         results = list(self.db.activities.aggregate([
+            # Unwind trackpoints to get individual points
             {"$unwind": "$trackpoints"},
-            {"$project": {
-                "user_id": 1,
-                "trackpoints": 1,
-                "prev_altitude": {
-                    "$arrayElemAt": [
-                        "$trackpoints.altitude",
-                        {"$subtract": [{"$indexOfArray": ["$trackpoints", "$trackpoints"]}, 1]}
-                    ]
-                }
-            }},
+            
+            # Filter out invalid altitudes (-777 is invalid)
             {"$match": {
-                "trackpoints.altitude": {"$ne": -777},
-                "prev_altitude": {"$ne": -777}
+                "trackpoints.altitude": {"$ne": -777}
             }},
-            {"$project": {
-                "user_id": 1,
-                "altitude_gain": {
-                    "$max": [
-                        {"$subtract": ["$trackpoints.altitude", "$prev_altitude"]},
-                        0
-                    ]
+            
+            # Group by user and activity to calculate gains within each activity
+            {"$group": {
+                "_id": {
+                    "user_id": "$user_id",
+                    "activity_id": "$activity_id"
+                },
+                "altitudes": {
+                    "$push": "$trackpoints.altitude"
                 }
             }},
+            
+            # Calculate altitude gains for each activity
+            {"$project": {
+                "user_id": "$_id.user_id",
+                "altitude_gains": {
+                    "$reduce": {
+                        "input": {"$range": [1, {"$size": "$altitudes"}]},
+                        "initialValue": 0,
+                        "in": {
+                            "$add": [
+                                "$$value",
+                                {
+                                    "$max": [
+                                        {
+                                            "$subtract": [
+                                                {"$arrayElemAt": ["$altitudes", "$$this"]},
+                                                {"$arrayElemAt": ["$altitudes", {"$subtract": ["$$this", 1]}]}
+                                            ]
+                                        },
+                                        0
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                }
+            }},
+            
+            # Group by user to sum up all altitude gains
             {"$group": {
                 "_id": "$user_id",
-                "total_altitude_gain": {"$sum": "$altitude_gain"}
+                "total_gain": {"$sum": "$altitude_gains"}
             }},
-            {"$sort": {"total_altitude_gain": -1}},
+            
+            # Sort by total gain in descending order
+            {"$sort": {"total_gain": -1}},
+            
+            # Get top 20 users
             {"$limit": 20}
         ]))
 
-        # Convert feet to meters
-        formatted_results = [
-            [r['_id'], round(r['total_altitude_gain'] * 0.3048, 2)]
+        # Convert altitude gains from feet to meters and format results
+        converted_results = [
+            (r["_id"], round(r["total_gain"] * 0.3048, 2))
             for r in results
         ]
         
         headers = ['User ID', 'Total Meters Gained']
         print("\n8. Top 20 users who have gained the most altitude meters:")
-        self.print_query_results(formatted_results, headers)
+        self.print_query_results(converted_results, headers)
 
+    
     # 9. Users with invalid activities
     def find_users_with_invalid_activities(self):
         invalid_activities = []
@@ -281,7 +324,6 @@ def main():
     program = None
     try:
         program = ActivityTrackerProgram()
-        
         # Execute all queries
         program.count_dataset_elements()
         program.average_activities_per_user()

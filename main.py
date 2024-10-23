@@ -233,28 +233,61 @@ class ActivityTrackerProgram:
         )
 
     def read_labels(self, dataset_path: str) -> Dict:
+        print("\nStarting to read transportation mode labels...")
         labels = {}
         labeled_ids_path = os.path.join(dataset_path, 'dataset', 'labeled_ids.txt')
         
-        with open(labeled_ids_path, 'r') as f:
-            labeled_ids = set(f.read().splitlines())
+        print(f"Reading labeled IDs from: {labeled_ids_path}")
+        try:
+            with open(labeled_ids_path, 'r') as f:
+                labeled_ids = set(f.read().splitlines())
+            print(f"Found {len(labeled_ids)} users with labels")
+        except Exception as e:
+            print(f"Error reading labeled_ids.txt: {e}")
+            return {}
         
         for user_id in labeled_ids:
+            print(f"\nProcessing labels for user: {user_id}")
             labels_file = os.path.join(dataset_path, 'dataset', 'Data', user_id, 'labels.txt')
+            
             if os.path.exists(labels_file):
-                with open(labels_file, 'r') as f:
-                    user_labels = []
-                    for line in f.readlines()[1:]:
-                        parts = line.strip().split('\t')
-                        if len(parts) == 3:
-                            start_time = datetime.datetime.strptime(parts[0], "%Y/%m/%d %H:%M:%S")
-                            end_time = datetime.datetime.strptime(parts[1], "%Y/%m/%d %H:%M:%S")
-                            mode = parts[2]
-                            user_labels.append((start_time, end_time, mode))
-                    labels[user_id] = user_labels
+                print(f"Found labels file: {labels_file}")
+                try:
+                    with open(labels_file, 'r') as f:
+                        user_labels = []
+                        lines = f.readlines()
+                        print(f"Found {len(lines)-1} label entries") # -1 for header
+                        
+                        for line_num, line in enumerate(lines[1:], start=2):
+                            try:
+                                parts = line.strip().split('\t')
+                                if len(parts) == 3:
+                                    start_time = datetime.datetime.strptime(parts[0], "%Y/%m/%d %H:%M:%S")
+                                    end_time = datetime.datetime.strptime(parts[1], "%Y/%m/%d %H:%M:%S")
+                                    mode = parts[2]
+                                    user_labels.append((start_time, end_time, mode))
+                                    print(f"Processed label {line_num-1}: {start_time} to {end_time}, mode: {mode}")
+                                else:
+                                    print(f"Warning: Line {line_num} has incorrect format: {line.strip()}")
+                            except Exception as e:
+                                print(f"Error processing line {line_num}: {e}")
+                                print(f"Line content: {line.strip()}")
+                                continue
+                        
+                        labels[user_id] = user_labels
+                        print(f"Successfully added {len(user_labels)} labels for user {user_id}")
+                except Exception as e:
+                    print(f"Error reading labels file for user {user_id}: {e}")
+            else:
+                print(f"Warning: No labels file found for user {user_id} at {labels_file}")
+        
+        print(f"\nLabel reading summary:")
+        print(f"Total users with label files: {len(labels)}")
+        print(f"Users with labels: {', '.join(labels.keys())}")
+        for user_id, user_labels in labels.items():
+            print(f"User {user_id}: {len(user_labels)} labels")
         
         return labels
-
     def find_matching_label(self, user_id: str, activity: Dict, labels: Dict) -> str:
         if user_id not in labels:
             return None
@@ -321,17 +354,27 @@ def main():
     program = None
     try:
         program = ActivityTrackerProgram()
+        
+        # Add these debug lines
+        print("\n=== Testing read_labels directly ===")
+        print("Current working directory:", os.getcwd())
+        dataset_path = 'dataset'
+        print(f"Looking for dataset in: {os.path.abspath(dataset_path)}")
+        
+        # Check if required files exist
+        labeled_ids_path = os.path.join(dataset_path, 'dataset', 'labeled_ids.txt')
+        print(f"Checking if labeled_ids.txt exists: {os.path.exists(labeled_ids_path)}")
+        
+        # Try to read labels directly
+        labels = program.read_labels(dataset_path)
+        print("\nLabels read:", bool(labels))
+        print("Number of users with labels:", len(labels))
+        
+        # Continue with the rest of your original main() function...
         program.drop_collections()
         program.create_collections()
-        
-        dataset_path = 'dataset'
         program.populate_user_table(dataset_path)
         program.populate_activities(dataset_path)
-        
-        program.fetch_data("users")
-        program.fetch_data("activities")
-        program.show_collections()
-        
         program.update_transportation_modes(dataset_path)
         program.verify_transportation_modes(dataset_path)
         
