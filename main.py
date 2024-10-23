@@ -32,20 +32,6 @@ class ActivityTrackerProgram:
         except Exception as e:
             print(f"Error inserting user {user_id}: {e}")
 
-    def insert_activity_data(self, activity_id: int, user_id: str, activity_data: Dict):
-        activity_doc = {
-            "activity_id": activity_id,
-            "user_id": user_id,
-            "transportation_mode": None,
-            "start_date_time": activity_data['start_date_time'],
-            "end_date_time": activity_data['end_date_time'],
-            "trackpoints": []  # Will be populated with trackpoints
-        }
-        try:
-            self.db.activities.insert_one(activity_doc)
-        except Exception as e:
-            print(f"Error inserting activity {activity_id}: {e}")
-
     def insert_trackpoints_batch(self, activity_id: int, trackpoints: List[tuple]):
         trackpoint_docs = []
         for tp in trackpoints:
@@ -105,21 +91,38 @@ class ActivityTrackerProgram:
         
         print("Users collection populated successfully")
 
+    from pymongo import MongoClient, ASCENDING
+import datetime
+import os
+from typing import List, Dict, Any
+from tabulate import tabulate
+from DbConnector import DbConnector
+
+class ActivityTrackerProgram:
+    def __init__(self):
+        self.connection = DbConnector()
+        self.db = self.connection.db
+        self.processed_activities = set()  # Track processed activity IDs
+
+    # ... [previous methods remain the same until populate_activities] ...
+
     def populate_activities(self, dataset_path: str):
         data_path = os.path.join(dataset_path, 'dataset', 'Data')
+        activity_counter = 0  # Global counter for unique IDs
         
         for root, dirs, files in os.walk(data_path):
             if 'Trajectory' in root:
                 user_id = os.path.basename(os.path.dirname(root))
-                for file in files:
+                
+                # Sort files to ensure consistent processing order
+                sorted_files = sorted(files)
+                
+                for file in sorted_files:
                     if file.endswith('.plt'):
-                        activity_id_str = f"{user_id}{os.path.splitext(file)[0]}"
-                        try:
-                            activity_id = int(activity_id_str)
-                        except ValueError:
-                            print(f"Invalid activity_id generated: {activity_id_str}")
-                            continue
-
+                        # Generate a truly unique activity ID using counter
+                        activity_counter += 1
+                        activity_id = activity_counter
+                        
                         file_path = os.path.join(root, file)
                         activity_data = self.process_activity_file(file_path)
                         
@@ -129,7 +132,29 @@ class ActivityTrackerProgram:
                             if trackpoints:
                                 self.insert_trackpoints_batch(activity_id, trackpoints)
         
-        print("Activities collection populated successfully")
+        print(f"Activities collection populated successfully with {activity_counter} activities")
+
+    def insert_activity_data(self, activity_id: int, user_id: str, activity_data: Dict):
+        if activity_id in self.processed_activities:
+            print(f"Warning: Duplicate activity ID {activity_id} detected. Skipping...")
+            return
+            
+        activity_doc = {
+            "activity_id": activity_id,
+            "user_id": user_id,
+            "transportation_mode": None,
+            "start_date_time": activity_data['start_date_time'],
+            "end_date_time": activity_data['end_date_time'],
+            "trackpoints": []
+        }
+        
+        try:
+            self.db.activities.insert_one(activity_doc)
+            self.processed_activities.add(activity_id)  # Track successfully processed activity
+        except Exception as e:
+            print(f"Error inserting activity {activity_id}: {e}")
+
+    # ... [rest of the methods remain the same] ...
 
     def process_activity_file(self, file_path: str) -> Dict:
         try:
