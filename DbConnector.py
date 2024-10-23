@@ -1,37 +1,40 @@
-from pymongo import MongoClient, version
-
+# Updated DbConnector.py
+from pymongo import MongoClient
+import os
+import time
 
 class DbConnector:
-    """
-    Connects to the MongoDB server on the Ubuntu virtual machine.
-    Connector needs HOST, USER and PASSWORD to connect.
-
-    Example:
-    HOST = "tdt4225-00.idi.ntnu.no" // Your server IP address/domain name
-    USER = "testuser" // This is the user you created and added privileges for
-    PASSWORD = "test123" // The password you set for said user
-    """
-
-    def __init__(self,
-                 DATABASE='DATABASE_NAME',
-                 HOST="tdt4225-xx.idi.ntnu.no",
-                 USER="TEST_USER",
-                 PASSWORD="test123"):
-        uri = "mongodb://%s:%s@%s/%s" % (USER, PASSWORD, HOST, DATABASE)
-        # Connect to the databases
-        try:
-            self.client = MongoClient(uri)
-            self.db = self.client[DATABASE]
-        except Exception as e:
-            print("ERROR: Failed to connect to db:", e)
-
-        # get database information
-        print("You are connected to the database:", self.db.name)
-        print("-----------------------------------------------\n")
+    def __init__(self, max_retries=30, retry_delay=2):
+        self.uri = os.getenv('MONGODB_URI', 'mongodb://mongodb:27017/')
+        self.database = os.getenv('MONGODB_DATABASE', 'geolife')
+        
+        print(f"Attempting to connect to MongoDB at {self.uri}")
+        retry_count = 0
+        last_error = None
+        
+        while retry_count < max_retries:
+            try:
+                self.client = MongoClient(
+                    self.uri,
+                    serverSelectionTimeoutMS=5000,
+                    connectTimeoutMS=5000,
+                )
+                # Test the connection
+                self.client.server_info()
+                self.db = self.client[self.database]
+                print(f"Successfully connected to MongoDB database: {self.db.name}")
+                return
+            except Exception as e:
+                last_error = e
+                retry_count += 1
+                print(f"Connection attempt {retry_count}/{max_retries} failed: {e}")
+                if retry_count < max_retries:
+                    print(f"Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+        
+        raise Exception(f"Failed to connect to MongoDB after {max_retries} attempts. Last error: {last_error}")
 
     def close_connection(self):
-        # close the cursor
-        # close the DB connection
-        self.client.close()
-        print("\n-----------------------------------------------")
-        print("Connection to %s-db is closed" % self.db.name)
+        if hasattr(self, 'client'):
+            self.client.close()
+            print(f"Connection to {self.db.name}-db is closed")

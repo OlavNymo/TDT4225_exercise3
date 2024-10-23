@@ -1,26 +1,38 @@
+# docker-compose.yml
 version: "3.8"
 
 services:
   mongodb:
     image: mongo:latest
+    container_name: mongodb
     environment:
       - MONGO_INITDB_DATABASE=geolife
     volumes:
       - mongodb_data:/data/db
     ports:
       - "27017:27017"
+    networks:
+      - app_network
 
   app:
     build: .
     container_name: exercise3
-    depends_on:
-      - mongodb
+
     volumes:
       - .:/app
     environment:
       - MONGODB_URI=mongodb://mongodb:27017/
       - MONGODB_DATABASE=geolife
-    command: tail -f /dev/null
+    networks:
+      - app_network
+    tty: true
+    stdin_open: true
+    command: >
+      sh -c "python main.py && tail -f /dev/null"
+
+networks:
+  app_network:
+    driver: bridge
 
 volumes:
   mongodb_data:
