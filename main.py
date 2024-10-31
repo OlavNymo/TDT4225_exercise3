@@ -10,13 +10,6 @@ class ActivityTrackerProgram:
         self.connection = DbConnector()
         self.db = self.connection.db
 
-    def create_collections(self):
-        # Create indexes
-        self.db.users.create_index([("user_id", ASCENDING)], unique=True)
-        self.db.activities.create_index([("activity_id", ASCENDING)], unique=True)
-        self.db.activities.create_index([("user_id", ASCENDING)])
-        print("Collections and indexes created successfully")
-
     def drop_collections(self):
         self.db.users.drop()
         self.db.activities.drop()
@@ -24,7 +17,7 @@ class ActivityTrackerProgram:
 
     def insert_user_data(self, user_id: str, has_labels: bool):
         user_doc = {
-            "user_id": user_id,
+            "_id": user_id,  
             "has_labels": has_labels
         }
         try:
@@ -33,8 +26,11 @@ class ActivityTrackerProgram:
             print(f"Error inserting user {user_id}: {e}")
 
     def insert_activity_data(self, activity_id: int, user_id: str, activity_data: Dict):
+        """
+        Insert activity data with activity_id as _id directly
+        """
         activity_doc = {
-            "activity_id": activity_id,
+            "_id": activity_id,  
             "user_id": user_id,
             "transportation_mode": None,
             "start_date_time": activity_data['start_date_time'],
@@ -47,6 +43,9 @@ class ActivityTrackerProgram:
             print(f"Error inserting activity {activity_id}: {e}")
 
     def insert_trackpoints_batch(self, activity_id: int, trackpoints: List[tuple]):
+        """
+        Updated to use _id instead of activity_id for queries
+        """
         trackpoint_docs = []
         for tp in trackpoints:
             trackpoint_doc = {
@@ -60,11 +59,17 @@ class ActivityTrackerProgram:
 
         try:
             self.db.activities.update_one(
-                {"activity_id": activity_id},
+                {"_id": activity_id},  
                 {"$push": {"trackpoints": {"$each": trackpoint_docs}}}
             )
         except Exception as e:
             print(f"Error inserting trackpoints for activity {activity_id}: {e}")
+
+    def create_collections(self):
+            # Create indexes
+            self.db.users.create_index([("has_labels", ASCENDING)])
+            self.db.activities.create_index([("user_id", ASCENDING)])
+            print("Collections and indexes created successfully")
 
     def fetch_data(self, collection_name: str):
         docs = list(self.db[collection_name].find({}, {'_id': 0}))
@@ -209,7 +214,7 @@ class ActivityTrackerProgram:
             for activity in activities:
                 transportation_mode = self.find_matching_label(user_id, activity, labels)
                 if transportation_mode:
-                    self.update_activity_transportation_mode(activity['activity_id'], transportation_mode)
+                    self.update_activity_transportation_mode(activity['_id'], transportation_mode)
                     labels_found = True
 
             if not labels_found:
@@ -218,19 +223,22 @@ class ActivityTrackerProgram:
         print("Transportation modes updated successfully")
 
     def get_users_with_labels(self) -> List[str]:
-        return [doc['user_id'] for doc in self.db.users.find({"has_labels": True})]
+        return [doc['_id'] for doc in self.db.users.find({"has_labels": True})]
 
     def get_user_activities(self, user_id: str) -> List[Dict]:
         return list(self.db.activities.find(
             {"user_id": user_id},
-            {"activity_id": 1, "start_date_time": 1, "end_date_time": 1}
+            {
+                "start_date_time": 1,
+                "end_date_time": 1
+            }
         ))
-
     def update_activity_transportation_mode(self, activity_id: int, transportation_mode: str):
         self.db.activities.update_one(
-            {"activity_id": activity_id},
+            {"_id": activity_id}, 
             {"$set": {"transportation_mode": transportation_mode}}
         )
+
 
     def read_labels(self, dataset_path: str) -> Dict:
         print("\nStarting to read transportation mode labels...")
@@ -256,7 +264,7 @@ class ActivityTrackerProgram:
                     with open(labels_file, 'r') as f:
                         user_labels = []
                         lines = f.readlines()
-                        print(f"Found {len(lines)-1} label entries") # -1 for header
+                        print(f"Found {len(lines)-1} label entries")
                         
                         for line_num, line in enumerate(lines[1:], start=2):
                             try:
@@ -266,7 +274,6 @@ class ActivityTrackerProgram:
                                     end_time = datetime.datetime.strptime(parts[1], "%Y/%m/%d %H:%M:%S")
                                     mode = parts[2]
                                     user_labels.append((start_time, end_time, mode))
-                                    print(f"Processed label {line_num-1}: {start_time} to {end_time}, mode: {mode}")
                                 else:
                                     print(f"Warning: Line {line_num} has incorrect format: {line.strip()}")
                             except Exception as e:
@@ -280,12 +287,6 @@ class ActivityTrackerProgram:
                     print(f"Error reading labels file for user {user_id}: {e}")
             else:
                 print(f"Warning: No labels file found for user {user_id} at {labels_file}")
-        
-        print(f"\nLabel reading summary:")
-        print(f"Total users with label files: {len(labels)}")
-        print(f"Users with labels: {', '.join(labels.keys())}")
-        for user_id, user_labels in labels.items():
-            print(f"User {user_id}: {len(user_labels)} labels")
         
         return labels
     def find_matching_label(self, user_id: str, activity: Dict, labels: Dict) -> str:
@@ -324,7 +325,7 @@ class ActivityTrackerProgram:
                     else:
                         inconsistent_activities.append({
                             'user_id': user_id,
-                            'activity_id': activity['activity_id'],
+                            'activity_id': activity['_id'], 
                             'db_mode': activity['transportation_mode'],
                             'label_mode': label_mode
                         })
@@ -334,7 +335,7 @@ class ActivityTrackerProgram:
         if inconsistent_activities:
             print("\nInconsistent activities found:")
             for activity in inconsistent_activities:
-                print(f"User: {activity['user_id']}, Activity: {activity['activity_id']}, "
+                print(f"User: {activity['user_id']}, Activity: {activity['_id']}, "
                       f"DB Mode: {activity['db_mode']}, Label Mode: {activity['label_mode']}")
         else:
             print("No inconsistencies found.")
@@ -343,7 +344,6 @@ class ActivityTrackerProgram:
         return list(self.db.activities.find(
             {"user_id": user_id},
             {
-                "activity_id": 1,
                 "start_date_time": 1,
                 "end_date_time": 1,
                 "transportation_mode": 1
@@ -351,38 +351,24 @@ class ActivityTrackerProgram:
         ))
 
 def main():
-    program = None
-    try:
-        program = ActivityTrackerProgram()
-        
-        # Add these debug lines
-        print("\n=== Testing read_labels directly ===")
-        print("Current working directory:", os.getcwd())
-        dataset_path = 'dataset'
-        print(f"Looking for dataset in: {os.path.abspath(dataset_path)}")
-        
-        # Check if required files exist
-        labeled_ids_path = os.path.join(dataset_path, 'dataset', 'labeled_ids.txt')
-        print(f"Checking if labeled_ids.txt exists: {os.path.exists(labeled_ids_path)}")
-        
-        # Try to read labels directly
-        labels = program.read_labels(dataset_path)
-        print("\nLabels read:", bool(labels))
-        print("Number of users with labels:", len(labels))
-        
-        # Continue with the rest of your original main() function...
-        program.drop_collections()
-        program.create_collections()
-        program.populate_user_table(dataset_path)
-        program.populate_activities(dataset_path)
-        program.update_transportation_modes(dataset_path)
-        program.verify_transportation_modes(dataset_path)
-        
-    except Exception as e:
-        print("ERROR: Failed to use database:", e)
-    finally:
-        if program:
-            program.connection.close_connection()
+        program = None
+        try:
+            program = ActivityTrackerProgram()
+            dataset_path = 'dataset'
 
+            program.drop_collections()
+            program.create_collections()
+            program.populate_user_table(dataset_path)
+            program.populate_activities(dataset_path)
+            
+            program.update_transportation_modes(dataset_path)
+            program.verify_transportation_modes(dataset_path)
+            
+        except Exception as e:
+            print("ERROR: Failed to use database:", e)
+        finally:
+            if program:
+                program.connection.close_connection()
+                
 if __name__ == '__main__':
     main()

@@ -1,4 +1,5 @@
 import datetime
+import json
 from DbConnector import DbConnector
 from tabulate import tabulate
 from haversine import haversine, Unit
@@ -7,27 +8,36 @@ class ActivityTrackerProgram:
     def __init__(self):
         self.connection = DbConnector()
         self.db = self.connection.db
-
+       
     def print_query_results(self, results, headers):
         print(tabulate(results, headers=headers, tablefmt='psql'))
         print()  # Add a blank line for readability
         
-    # Print some activities in a nice format for users 141 and 144
-    def print_activities(self, activities):
-        print("Sample activities for users 141 and 144:")
-        for activity in activities:
-            user_id = activity['user_id']
-            if user_id in ['135','141', '144']:
-                activity_id = activity['_id']
-                start_time = activity['start_date_time']
-                end_time = activity['end_date_time']
-                transportation_mode = activity['transportation_mode']
-                trackpoint_count = len(activity['trackpoints'])
-                print(f"User ID: {user_id}, Activity ID: {activity_id}")
-                print(f"Start Time: {start_time}, End Time: {end_time}")
-                print(f"Transportation Mode: {transportation_mode}")
-                print(f"Trackpoint Count: {trackpoint_count}")
-                print()
+    def print_multiple_documents_as_json(self, collection_name: str, trackpoint_limit=10, document_limit=5):
+        """
+        Prints multiple documents from the specified collection in JSON format, showing only a limited number
+        of trackpoints for each document.
+        Args:
+        collection_name (str): The name of the collection to query.
+        trackpoint_limit (int): The number of trackpoints to display if present.
+        document_limit (int): The number of documents to display.
+        """
+        documents = self.db[collection_name].find().limit(document_limit)
+        if documents:
+            print(f"\n{document_limit} documents from collection '{collection_name}':")
+            for i, document in enumerate(documents):
+                print(f"\nDocument {i + 1}:")
+                # Limit the number of trackpoints in the document, if present
+                if 'trackpoints' in document:
+                    document['trackpoints'] = document['trackpoints'][:trackpoint_limit]
+                    print(f"Showing only the first {trackpoint_limit} trackpoints...")
+                # Pretty print JSON
+                print(json.dumps(document, indent=4, default=str)) # Pretty print JSON
+                
+        else:
+            print(f"No documents found in collection '{collection_name}'.")
+        
+
     # 1. Dataset counts
     def count_dataset_elements(self):
         user_count = self.db.users.count_documents({})
@@ -70,6 +80,7 @@ class ActivityTrackerProgram:
 
     # 4. Users who have taken a taxi
     def users_who_took_taxi(self):
+
         results = list(self.db.activities.distinct(
             "user_id",
             {"transportation_mode": "taxi"}
@@ -184,35 +195,42 @@ class ActivityTrackerProgram:
             {"$group": {
                 "_id": {
                     "user_id": "$user_id",
-                    "activity_id": "$activity_id"
+                    "activity_id": "$_id"
                 },
-                "altitudes": {
+                "trackpoints": {  
                     "$push": "$trackpoints.altitude"
                 }
             }},
             
-            # Calculate altitude gains for each activity
+            # Calculate altitude gains between consecutive points
             {"$project": {
                 "user_id": "$_id.user_id",
                 "altitude_gains": {
                     "$reduce": {
-                        "input": {"$range": [1, {"$size": "$altitudes"}]},
+                        "input": {"$range": [1, {"$size": "$trackpoints"}]}, 
                         "initialValue": 0,
                         "in": {
-                            "$add": [
-                                "$$value",
-                                {
-                                    "$max": [
-                                        {
-                                            "$subtract": [
-                                                {"$arrayElemAt": ["$altitudes", "$$this"]},
-                                                {"$arrayElemAt": ["$altitudes", {"$subtract": ["$$this", 1]}]}
-                                            ]
-                                        },
+                            "$cond": {
+                                "if": {
+                                    "$gt": [
+                                        {"$subtract": [
+                                            {"$arrayElemAt": ["$trackpoints", "$$this"]},
+                                            {"$arrayElemAt": ["$trackpoints", {"$subtract": ["$$this", 1]}]}
+                                        ]},
                                         0
                                     ]
-                                }
-                            ]
+                                },
+                                "then": {
+                                    "$add": [
+                                        "$$value",
+                                        {"$subtract": [
+                                            {"$arrayElemAt": ["$trackpoints", "$$this"]},
+                                            {"$arrayElemAt": ["$trackpoints", {"$subtract": ["$$this", 1]}]}
+                                        ]}
+                                    ]
+                                },
+                                "else": "$$value"
+                            }
                         }
                     }
                 }
@@ -320,11 +338,11 @@ class ActivityTrackerProgram:
         print("\n11. Users with registered transportation_mode and their most used mode:")
         self.print_query_results(formatted_results, headers)
 
+    
 def main():
     program = None
     try:
         program = ActivityTrackerProgram()
-        # Execute all queries
         program.count_dataset_elements()
         program.average_activities_per_user()
         program.top_20_users_by_activity_count()
@@ -336,6 +354,8 @@ def main():
         program.find_users_with_invalid_activities()
         program.find_users_in_forbidden_city()
         program.find_users_most_used_transportation()
+        program.print_multiple_documents_as_json('activities', trackpoint_limit=3)
+        program.print_multiple_documents_as_json('users')
         
     except Exception as e:
         print("An error occurred:", e)
